@@ -25,7 +25,7 @@
 ### General variables
 
 - `nexus_version:` 3.28.1-01 - версия nexus. Смотрите актуальную https://www.sonatype.com/download-oss-sonatype.
-- `nexus_download_url:` https://repository.int.platform.tatar.ru/repository/platform-raw-hosted-public/nexus/3 - путь откуда скачивается nexus.
+- `nexus_download_url:`https://help.sonatype.com/en/download.html - путь откуда скачивается nexus.
 - `nexus_backup_dir:` /var/nexus-backup - путь для хранения бэкапов. Функционал не реализован.
 ### Nexus OS user and group
 - `nexus_os_group:` nexus - системная группа которой принадлежат файлы и от которой работает процесс.
