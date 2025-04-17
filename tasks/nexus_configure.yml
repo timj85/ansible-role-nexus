@@ -1,0 +1,573 @@
+---
+- name: Allow nexus to create first-time install configuration files in  {{ nexus_installation_dir }}/nexus-{{ nexus_version }}/etc
+  file:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/etc"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+    recurse: yes
+  loop: "{{ nexus_app_dir_settings_dirs }}"
+
+- name: Stop the admin wizard from running
+  lineinfile:
+    path: "{{ nexus_default_settings_file }}"
+    line: "nexus.onboarding.enabled={{ nexus_onboarding_wizard }}"
+    create: true
+
+- name: Find JVM configuration file for newer versions
+  find:
+    paths: "{{ nexus_installation_dir }}/nexus-latest"
+    recurse: yes
+    patterns: "jvm.config"
+  register: jvm_config_files
+  when: nexus_version is version_compare('3.30.0', '>=')
+
+- name: Set JVM config path variable
+  set_fact:
+    nexus_jvm_config_path: "{{ jvm_config_files.files[0].path }}"
+  when: 
+    - nexus_version is version_compare('3.30.0', '>=')
+    - jvm_config_files.matched > 0
+
+- name: Debug JVM config path
+  debug:
+    var: nexus_jvm_config_path
+    verbosity: 2
+  when: nexus_version is version_compare('3.30.0', '>=')
+
+- name: Setup Nexus JVM heap size
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.vmoptions"
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.value }}"
+  loop:
+    - { regexp: "-Xmx.*", value: "-Xmx{{ nexus_max_heap_size }}" }
+    - { regexp: "-Xms.*", value: "-Xms{{ nexus_min_heap_size }}" }
+  notify: nexus-service-stop
+  when: nexus_version is version_compare('3.30.0', '<')
+
+- name: Setup Nexus JVM heap size for newer versions
+  lineinfile:
+    dest: "{{ nexus_jvm_config_path }}"
+    regexp: "^{{ item.regexp }}"
+    line: "{{ item.value }}"
+    create: yes
+  loop:
+    - { regexp: "-Xmx.*", value: "-Xmx{{ nexus_max_heap_size }}" }
+    - { regexp: "-Xms.*", value: "-Xms{{ nexus_min_heap_size }}" }
+  notify: nexus-service-stop
+  when: 
+    - nexus_version is version_compare('3.30.0', '>=')
+    - nexus_jvm_config_path is defined
+
+- name: Create Nexus tmp/backup directory
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+  loop:
+    - "{{ nexus_tmp_dir }}"
+    - "{{ nexus_backup_dir }}"
+
+- name: Setup Nexus options
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.vmoptions"
+    regexp: "^{{ item.regexp | regex_escape() }}"
+    line: "{{ item.regexp }}={{ item.value }}"
+  loop: "{{ nexus_options }}"
+  notify: nexus-service-stop
+  when: nexus_version is version_compare('3.30.0', '<')
+
+- name: Setup Nexus options for newer versions
+  lineinfile:
+    dest: "{{ nexus_jvm_config_path }}"
+    regexp: "^{{ item.regexp | regex_escape() }}"
+    line: "{{ item.regexp }}={{ item.value }}"
+    create: yes
+  loop: "{{ nexus_options }}"
+  notify: nexus-service-stop
+  when: 
+    - nexus_version is version_compare('3.30.0', '>=')
+    - nexus_jvm_config_path is defined
+
+- name: Create .bashrc file
+  ansible.builtin.file:
+    path: "{{ nexus_data_dir }}/.bashrc"
+    state: touch
+    mode: '0644'
+
+- name: Change ownership of nexus_data_dir
+  ansible.builtin.file:
+    path: "{{ nexus_data_dir }}"
+    owner: nexus
+    group: nexus
+    mode: '0755'
+    recurse: yes
+     
+- name: Set NEXUS_HOME for the service user
+  lineinfile:
+    dest: "{{ nexus_data_dir }}/.bashrc"
+    regexp: "^export NEXUS_HOME=.*"
+    line: "export NEXUS_HOME={{ nexus_installation_dir }}/nexus-latest"
+  notify: nexus-service-stop
+
+- name: Set nexus user
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.rc"
+    regexp: ".*run_as_user=.*"
+    line: "run_as_user=\"{{ nexus_os_user }}\""
+  notify: nexus-service-stop
+
+- name: Set NEXUS_DATA in nexus.rc
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.rc"
+    regexp: "^#?NEXUS_DATA=.*"
+    line: "NEXUS_DATA=\"{{ nexus_data_dir }}\""
+  notify: nexus-service-stop
+
+- name: SetUP nexus default settings
+  lineinfile:
+    dest: "{{ nexus_default_settings_file }}"
+    regexp: "^{{ item.regexp | regex_escape() }}"
+    line: "{{ item.regexp }}={{ item.value }}"
+  loop: "{{ nexus_default_settings }}"
+  notify: nexus-service-stop
+
+- name: Create systemd service configuration
+  template:
+    src: nexus.service
+    dest: /etc/systemd/system
+  notify: systemd-reload
+
+- name: Check if data directory is empty (first-time install)
+  find:
+    paths: "{{ nexus_data_dir }}"
+  register: nexus_data_dir_contents
+  check_mode: no
+  changed_when: false
+
+- name: Создание символической ссылки nexus-latest
+  file:
+    src: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}"
+    dest: "{{ nexus_installation_dir }}/nexus-latest"
+    state: link
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+  register: nexus_latest_version
+
+- name: Clean cache for upgrade process
+  file:
+    path: "{{ nexus_data_dir }}/cache"
+    state: absent
+  when: nexus_latest_version.changed and nexus_data_dir_contents.matched > 0
+
+- name: Create debug task to check Nexus logs
+  command: "cat {{ nexus_data_dir }}/log/nexus.log"
+  register: nexus_log_output
+  ignore_errors: yes
+  changed_when: false
+  when: nexus_latest_version.changed and (nexus_debug_logs | default(false) | bool)
+
+- name: Display Nexus log output
+  debug:
+    var: nexus_log_output.stdout_lines
+    verbosity: 2
+  when: nexus_log_output is defined and (nexus_debug_logs | default(false) | bool)
+
+- name: Check if environment file exists
+  stat:
+    path: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.vmoptions"
+  register: nexus_vmoptions_file
+
+- name: Create environment file if it doesn't exist
+  file:
+    path: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.vmoptions"
+    state: touch
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: not nexus_vmoptions_file.stat.exists
+
+- name: Ensure INSTALL4J_ADD_VM_PARAMS is set in environment
+  lineinfile:
+    path: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus"
+    regexp: '^INSTALL4J_ADD_VM_PARAMS='
+    line: 'INSTALL4J_ADD_VM_PARAMS="-Xms{{ nexus_min_heap_size }} -Xmx{{ nexus_max_heap_size }} -XX:MaxDirectMemorySize={{ nexus_max_direct_memory }} -Djava.util.prefs.userRoot={{ nexus_data_dir }}/.java"'
+    create: no
+  notify: nexus-service-stop
+
+- name: Debug Nexus directory structure
+  shell: "find {{ nexus_installation_dir }}/nexus-latest -type d | sort"
+  register: nexus_dir_structure
+  changed_when: false
+  when: nexus_debug_logs | default(false) | bool
+
+- name: Display Nexus directory structure
+  debug:
+    var: nexus_dir_structure.stdout_lines
+    verbosity: 2
+  when: nexus_dir_structure is defined and (nexus_debug_logs | default(false) | bool)
+
+- name: Ensure required data directories exist with correct permissions
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+    recurse: yes
+  loop:
+    - "{{ nexus_data_dir }}/etc"
+    - "{{ nexus_data_dir }}/log"
+    - "{{ nexus_data_dir }}/tmp"
+    - "{{ nexus_data_dir }}/karaf"
+    - "{{ nexus_data_dir }}/db"
+    - "{{ nexus_data_dir }}/blobs"
+    - "{{ nexus_data_dir }}/instances"
+    - "{{ nexus_data_dir }}/cache"
+    - "{{ nexus_data_dir }}/orient"
+    - "{{ nexus_data_dir }}/keystores"
+    - "{{ nexus_data_dir }}/backup"
+
+- name: Create empty Nexus log files if they don't exist
+  file:
+    path: "{{ item }}"
+    state: touch
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  loop:
+    - "{{ nexus_data_dir }}/log/nexus.log"
+    - "{{ nexus_data_dir }}/log/karaf.log"
+    - "{{ nexus_data_dir }}/log/request.log"
+
+- name: Set NEXUS_DATA in nexus.rc
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-latest/bin/nexus.rc"
+    regexp: "^#?NEXUS_DATA=.*"
+    line: "NEXUS_DATA=\"{{ nexus_data_dir }}\""
+  notify: nexus-service-stop
+
+- name: Ensure etc directory exists
+  file:
+    path: "{{ nexus_data_dir }}/etc"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+
+- name: Create nexus.properties file
+  template:
+    src: nexus.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/nexus.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  notify: nexus-service-stop
+
+- name: Get Nexus service status
+  command: systemctl status nexus
+  register: nexus_service_status
+  changed_when: false
+  ignore_errors: yes
+  when: nexus_debug_logs | default(false) | bool
+
+- name: Display Nexus service status
+  debug:
+    var: nexus_service_status.stdout_lines
+    verbosity: 2
+  when: nexus_service_status is defined and nexus_service_status.stdout_lines is defined and (nexus_debug_logs | default(false) | bool)
+
+- name: Ensure correct ownership of nexus directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    recurse: yes
+  loop:
+    - "{{ nexus_installation_dir }}/nexus-latest"
+    - "{{ nexus_data_dir }}"
+
+- name: Check if Nexus is running
+  command: systemctl status nexus
+  register: nexus_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: Restart Nexus service if not running
+  systemd:
+    name: nexus
+    state: restarted
+    daemon_reload: yes
+  ignore_errors: yes
+  notify:
+    - wait-for-nexus
+    - wait-for-nexus-port
+
+- name: Wait for Nexus to start (if not already running)
+  wait_for:
+    path: "{{ nexus_data_dir }}/log/nexus.log"
+    search_regex: "Started Sonatype Nexus OSS|Started Sonatype Nexus Repository Manager|Sonatype Nexus Repository Manager .* started|Started Nexus Repository Manager"
+    timeout: 60
+  ignore_errors: yes
+  register: nexus_start_check
+
+- name: Check Nexus logs if start check fails
+  shell: "tail -n 50 {{ nexus_data_dir }}/log/nexus.log || echo 'Log file is empty'"
+  register: nexus_log_content
+  when: nexus_start_check is failed and (nexus_show_fail_logs | default(true) | bool)
+  changed_when: false
+
+- name: Display Nexus log content
+  debug:
+    var: nexus_log_content.stdout_lines
+  when: nexus_log_content is defined
+
+- name: Check Nexus service status after configuration
+  command: systemctl status nexus
+  register: nexus_service_status_after
+  changed_when: false
+  ignore_errors: yes
+  when: nexus_debug_logs | default(false) | bool
+
+- name: Display Nexus service status after configuration
+  debug:
+    var: nexus_service_status_after.stdout_lines
+    verbosity: 2
+  when: nexus_service_status_after is defined and (nexus_debug_logs | default(false) | bool)
+
+- name: Check Nexus logs for errors
+  shell: "tail -n 50 {{ nexus_data_dir }}/log/nexus.log || echo 'Log file is empty or does not exist'"
+  register: nexus_log_tail
+  changed_when: false
+  ignore_errors: yes
+  when: nexus_show_fail_logs | default(true) | bool
+
+- name: Display Nexus log tail
+  debug:
+    var: nexus_log_tail.stdout_lines
+    verbosity: 1
+  when: nexus_log_tail is defined and (nexus_show_fail_logs | default(true) | bool)
+
+- name: Check if Nexus is listening on port 8081
+  shell: "netstat -tulpn | grep 8081 || echo 'No process listening on port 8081'"
+  register: nexus_port_check
+  changed_when: false
+  ignore_errors: yes
+  when: nexus_debug_logs | default(false) | bool
+
+- name: Display port check results
+  debug:
+    var: nexus_port_check.stdout_lines
+    verbosity: 2
+  when: nexus_port_check is defined and (nexus_debug_logs | default(false) | bool)
+
+- name: Проверка структуры каталогов для Nexus 3.77.1-01
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+    recurse: yes
+  loop:
+    - "{{ nexus_data_dir }}/etc"
+    - "{{ nexus_data_dir }}/log"
+    - "{{ nexus_data_dir }}/tmp"
+    - "{{ nexus_data_dir }}/karaf"
+    - "{{ nexus_data_dir }}/db"
+    - "{{ nexus_data_dir }}/blobs"
+    - "{{ nexus_data_dir }}/instances"
+    - "{{ nexus_data_dir }}/cache"
+    - "{{ nexus_data_dir }}/orient"
+    - "{{ nexus_data_dir }}/keystores"
+    - "{{ nexus_data_dir }}/backup"
+    - "{{ nexus_data_dir }}/etc/karaf"
+    - "{{ nexus_data_dir }}/etc/jetty"
+    - "{{ nexus_data_dir }}/etc/logback"
+    - "{{ nexus_data_dir }}/etc/ssl"
+
+- name: Создание пустых файлов логов
+  file:
+    path: "{{ item }}"
+    state: touch
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  loop:
+    - "{{ nexus_data_dir }}/log/nexus.log"
+    - "{{ nexus_data_dir }}/log/karaf.log"
+    - "{{ nexus_data_dir }}/log/request.log"
+    - "{{ nexus_data_dir }}/log/audit.log"
+    - "{{ nexus_data_dir }}/log/tasks.log"
+
+- name: Обновление файла службы systemd для Nexus 3.77.1-01
+  template:
+    src: nexus.service
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: systemd-reload
+
+- name: Проверка наличия файла jvm.config для Nexus 3.77.1-01
+  stat:
+    path: "{{ nexus_data_dir }}/nexus-latest/etc/karaf/jvm.config"
+  register: jvm_config_file_stat
+  when: nexus_version is version_compare('3.70.0', '>=')
+
+- name: Создание каталога karaf если не существует
+  file:
+    path: "{{ nexus_data_dir }}/nexus-latest/etc/karaf"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+  when: 
+    - nexus_version is version_compare('3.70.0', '>=')
+    - not jvm_config_file_stat.stat.exists
+
+- name: Создание файла jvm.config если не существует
+  copy:
+    content: |
+      -Xms{{ nexus_min_heap_size }}
+      -Xmx{{ nexus_max_heap_size }}
+      -XX:MaxDirectMemorySize={{ nexus_max_direct_memory }}
+      -XX:+UnlockDiagnosticVMOptions
+      -XX:+LogVMOutput
+      -XX:LogFile={{ nexus_data_dir }}/log/jvm.log
+      -XX:-OmitStackTraceInFastThrow
+      -Djava.net.preferIPv4Stack=true
+      # -Dkaraf.home=.
+      # -Dkaraf.base=.
+      -Dkaraf.etc=etc/karaf
+      -Djava.util.logging.config.file=etc/karaf/java.util.logging.properties
+      -Dkaraf.data={{ nexus_data_dir }}
+      -Dkaraf.log={{ nexus_data_dir }}/log
+      -Djava.io.tmpdir={{ nexus_data_dir }}/tmp
+      -Dkaraf.startLocalConsole=false
+      -Djava.util.prefs.userRoot={{ nexus_data_dir }}/.java
+    dest: "{{ nexus_installation_dir }}/nexus-latest/etc/karaf/jvm.config"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: 
+    - nexus_version is version_compare('3.70.0', '>=')
+    - not jvm_config_file_stat.stat.exists
+
+- name: Проверка наличия файла nexus.properties
+  stat:
+    path: "{{ nexus_data_dir }}/etc/nexus.properties"
+  register: nexus_properties_file
+
+- name: Создание файла nexus.properties, если он не существует
+  template:
+    src: nexus.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/nexus.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: not nexus_properties_file.stat.exists
+
+- name: Перезапуск службы Nexus с увеличенным таймаутом
+  systemd:
+    name: nexus
+    state: restarted
+    daemon_reload: yes
+  register: nexus_restart_result
+  ignore_errors: yes
+
+- name: Создание файла nexus-store.properties для PostgreSQL
+  template:
+    src: nexus-store.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/fabric/nexus-store.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: nexus_db_type == "postgresql"
+  notify: nexus-service-restart
+
+- name: Создание директории для PID файла
+  file:
+    path: "/mnt/nexus/tmp"
+    state: directory
+    owner: "nexus"
+    group: "nexus"
+    mode: "0755"
+  notify: nexus-service-restart
+
+- name: Создание директории для данных Karaf
+  file:
+    path: "/mnt/nexus/data"
+    state: directory
+    owner: "nexus"
+    group: "nexus"
+    mode: "0755"
+  notify: nexus-service-restart
+
+- name: Проверка конфигурации Nexus
+  command: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus check"
+  register: nexus_check
+  changed_when: false
+  ignore_errors: yes
+
+- name: Проверка наличия файла nexus.vmoptions
+  stat:
+    path: "/opt/nexus-3.78.1-02/bin/nexus.vmoptions"
+  register: nexus_vmoptions_file
+
+- name: Добавление свойства karaf.data в nexus.vmoptions
+  lineinfile:
+    path: "/opt/nexus-3.78.1-02/bin/nexus.vmoptions"
+    line: "-Dkaraf.data=/mnt/nexus/data"
+    state: present
+  notify: nexus-service-restart
+
+- name: Проверка журналов Nexus
+  shell: "journalctl -u nexus.service -n 20"
+  register: nexus_logs
+  changed_when: false
+  ignore_errors: yes
+  when: (ansible_os_family == 'RedHat' or ansible_os_family == 'Debian') and (nexus_debug_logs | default(false) | bool)
+
+- name: Создание директории для данных
+  file:
+    path: "/mnt/nexus/data"
+    state: directory
+    owner: "nexus"
+    group: "nexus"
+    mode: "0755"
+  notify: nexus-service-restart
+
+- name: systemd-reload
+  systemd:
+    daemon_reload: yes
+
+- name: nexus-service-restart
+  systemd:
+    name: nexus
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+  ignore_errors: yes
+
+- name: nexus-service-stop
+  systemd:
+    name: nexus
+    state: stopped
+    daemon_reload: yes
+
+- name: Создание/Обновление файла logback.xml для уменьшения уровня логирования
+  template:
+    src: logback.xml.j2
+    dest: "{{ nexus_data_dir }}/etc/logback/logback.xml"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  notify: nexus-service-restart
+  when: nexus_log_level is defined
+
+- meta: flush_handlers

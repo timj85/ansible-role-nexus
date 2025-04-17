@@ -1,0 +1,32 @@
+# Nexus core settings
+{% if nexus_context_path is defined %}
+nexus-context-path={{ nexus_context_path }}
+{% else %}
+nexus-context-path={{ nexus_context_path | default('/nexus') }}
+{% endif %}
+nexus-edition=nexus-oss-edition
+nexus-features=\
+  nexus-oss-feature
+
+# Jetty section
+application-port={{ nexus_default_port }}
+application-host={{ nexus_host }}
+nexus-args=${jetty.etc}/jetty.xml,${jetty.etc}/jetty-http.xml,${jetty.etc}/jetty-requestlog.xml
+
+# Nexus Data settings
+nexus-data={{ nexus_data_dir }}
+
+# Enable datastore
+nexus.datastore.enabled=true
+
+# PostgreSQL settings (для версии 3.77.1-01)
+{% if nexus_version is version_compare('3.70.0', '>=') and nexus_db_type is defined and nexus_db_type == 'postgresql' %}
+nexus.datastore.nexus-type=postgresql
+nexus.datastore.nexus-host={{ nexus_db_host | default('localhost') }}
+nexus.datastore.nexus-port={{ nexus_db_port | default(5432) }}
+nexus.datastore.nexus-database={{ nexus_db_name | default('nexus') }}
+nexus.datastore.nexus-username={{ nexus_db_username | default('nexus') }}
+nexus.datastore.nexus-password={{ nexus_db_password | default('nexus') }}
+{% endif %}
+
+nexus.scripts.allowCreation=true 

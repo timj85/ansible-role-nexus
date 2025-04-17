@@ -1,0 +1,78 @@
+---
+# handlers file for ansible-role-nexus
+- name: systemd-reload
+  systemd:
+    daemon_reload: yes
+
+- name: nexus systemd service stop
+  systemd:
+    name: nexus
+    state: stopped
+  ignore_errors: yes
+
+- name: nexus systemd service start
+  systemd:
+    name: nexus
+    state: started
+    enabled: yes
+  ignore_errors: yes
+
+- name: nexus-service-restart
+  systemd:
+    name: nexus
+    state: restarted
+    daemon_reload: yes
+  when: nexus_service_enabled | bool
+  ignore_errors: yes
+
+- name: nexus-service-stop
+  systemd:
+    name: nexus
+    state: stopped
+    daemon_reload: yes
+  ignore_errors: yes
+
+- name: check nexus service status
+  command: systemctl status nexus
+  register: nexus_service_status
+  ignore_errors: yes
+  changed_when: false
+
+- name: display nexus service status
+  debug:
+    var: nexus_service_status.stdout_lines
+  when: nexus_service_status is defined
+
+- name: wait-for-nexus
+  wait_for:
+    path: "{{ nexus_data_dir }}/log/nexus.log"
+    search_regex: "Started Sonatype Nexus OSS"
+    timeout: 1800
+  ignore_errors: yes
+  register: nexus_log_result
+  notify:
+    - check-nexus-service-status
+
+- name: wait-for-nexus-port
+  wait_for:
+    host: "{{ nexus_host }}"
+    port: "{{ nexus_port }}"
+    timeout: 600
+  ignore_errors: yes
+
+- name: display-nexus-service-status
+  debug:
+    var: nexus_service_status.stdout_lines
+  when: nexus_service_status is defined
+
+- name: check-nexus-logs
+  shell: "tail -n 200 {{ nexus_data_dir }}/log/nexus.log || echo 'Log file is empty or does not exist'"
+  register: nexus_log_tail
+  when: nexus_log_result is failed
+  changed_when: false
+  ignore_errors: yes
+
+- name: display-nexus-logs
+  debug:
+    var: nexus_log_tail.stdout_lines
+  when: nexus_log_tail is defined

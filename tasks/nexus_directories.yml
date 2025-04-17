@@ -1,0 +1,41 @@
+---
+- name: Создание необходимых каталогов для Nexus 3.77.1-01
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+    recurse: no
+  loop:
+    - "{{ nexus_data_dir }}/etc"
+    - "{{ nexus_data_dir }}/log"
+    - "{{ nexus_data_dir }}/tmp"
+    - "{{ nexus_data_dir }}/karaf"
+    - "{{ nexus_data_dir }}/db"
+    - "{{ nexus_data_dir }}/blobs"
+    - "{{ nexus_data_dir }}/instances"
+    - "{{ nexus_data_dir }}/cache"
+    - "{{ nexus_data_dir }}/orient"
+    - "{{ nexus_data_dir }}/keystores"
+    - "{{ nexus_data_dir }}/backup"
+    - "{{ nexus_data_dir }}/etc/karaf"
+    - "{{ nexus_data_dir }}/etc/jetty"
+    - "{{ nexus_data_dir }}/etc/logback"
+    - "{{ nexus_data_dir }}/etc/ssl"
+    - "{{ nexus_data_dir }}/.java"
+
+- name: Создание пустых файлов логов
+  file:
+    path: "{{ item }}"
+    state: touch
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  loop:
+    - "{{ nexus_data_dir }}/log/nexus.log"
+    - "{{ nexus_data_dir }}/log/karaf.log"
+    - "{{ nexus_data_dir }}/log/request.log"
+    - "{{ nexus_data_dir }}/log/audit.log"
+    - "{{ nexus_data_dir }}/log/tasks.log"
+    - "{{ nexus_data_dir }}/log/jvm.log" 

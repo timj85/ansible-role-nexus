@@ -1,0 +1,180 @@
+---
+- name: Ensure Nexus o/s group exists
+  group:
+    name: "{{ nexus_os_group }}"
+    state: present
+
+- name: Ensure Nexus o/s user exists
+  user:
+    name: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    home: "{{ nexus_data_dir }}"
+    shell: /bin/bash
+    state: present
+
+- name: Ensure Nexus installation directory exists
+  file:
+    path: "{{ nexus_installation_dir }}"
+    state: directory
+
+- name: Проверка наличия каталога для установки
+  file:
+    path: "{{ nexus_installation_dir }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+
+- name: Создание временного каталога для загрузки
+  file:
+    path: "{{ nexus_tmp_dir }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+
+- name: Загрузка архива Nexus
+  get_url:
+    url: "{{ nexus_download_url }}/nexus-{{ nexus_version }}-unix.tar.gz"
+    dest: "{{ nexus_tmp_dir }}/nexus-{{ nexus_version }}-unix.tar.gz"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  register: nexus_download
+
+- name: Распаковка архива Nexus
+  unarchive:
+    src: "{{ nexus_tmp_dir }}/nexus-{{ nexus_version }}-unix.tar.gz"
+    dest: "{{ nexus_installation_dir }}"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    remote_src: yes
+    creates: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}"
+  when: nexus_download.changed
+  register: nexus_unpack
+
+- name: Создание символической ссылки nexus-latest
+  file:
+    src: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}"
+    dest: "{{ nexus_installation_dir }}/nexus-latest"
+    state: link
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+  register: nexus_latest_link
+
+- name: Проверка наличия файла службы Nexus
+  stat:
+    path: /etc/systemd/system/nexus.service
+  register: nexus_service_file
+
+- name: Удаление существующего файла службы Nexus
+  file:
+    path: /etc/systemd/system/nexus.service
+    state: absent
+  when: nexus_service_file.stat.exists
+  notify: systemd-reload
+
+- name: Создание файла службы Nexus
+  template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: not nexus_service_file.stat.exists
+  notify: systemd-reload
+
+- name: Проверка структуры каталогов Nexus
+  stat:
+    path: "/opt/nexus-{{ nexus_version }}/bin"
+  register: nexus_bin_dir
+
+- name: Создание каталога bin, если он не существует
+  file:
+    path: "/opt/nexus-{{ nexus_version }}/bin"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+  when: not nexus_bin_dir.stat.exists
+
+- name: Проверка наличия файла nexus.rc
+  stat:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+  register: nexus_rc_file
+
+- name: Создание файла nexus.rc, если он не существует
+  copy:
+    content: "run_as_user=\"{{ nexus_os_user }}\"\n"
+    dest: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: not nexus_rc_file.stat.exists
+
+- name: Установка пользователя для запуска Nexus
+  lineinfile:
+    dest: "/opt/nexus-{{ nexus_version }}/bin/nexus.rc"
+    regexp: ".*run_as_user=.*"
+    line: 'run_as_user="{{ nexus_os_user }}"'
+  notify:
+    - systemd-reload
+    - nexus-service-restart
+
+- name: Установка NEXUS_DATA в nexus.rc
+  lineinfile:
+    dest: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+    regexp: "^#?NEXUS_DATA=.*"
+    line: "NEXUS_DATA=\"{{ nexus_data_dir }}\""
+  notify: nexus-service-restart
+
+- meta: flush_handlers
+
+- name: Delete unpacked data directory
+  file:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/data"
+    state: absent
+  when: nexus_version is version_compare('3.30.0', '<')
+
+- name: Проверка наличия скрипта запуска Nexus
+  stat:
+    path: "/opt/nexus-{{ nexus_version }}/bin/nexus"
+  register: nexus_script
+
+- name: Вывод предупреждения, если скрипт запуска не найден
+  debug:
+    msg: "ВНИМАНИЕ: Скрипт запуска Nexus не найден в /opt/nexus-{{ nexus_version }}/bin/nexus"
+  when: not nexus_script.stat.exists
+
+- name: Проверка содержимого распакованного архива Nexus
+  find:
+    paths: "/opt/nexus-{{ nexus_version }}"
+    recurse: yes
+    file_type: directory
+    patterns: "bin"
+  register: nexus_bin_search
+
+- name: Вывод найденных каталогов bin
+  debug:
+    var: nexus_bin_search.files
+  when: nexus_bin_search.matched > 0
+
+- name: Проверка логов Nexus
+  shell: |
+    for dir in /opt/sonatype-work/nexus3/log /opt/nexus-{{ nexus_version }}/log /mnt/nexus/log; do
+      if [ -d "$dir" ] && [ -f "$dir/nexus.log" ]; then
+        tail -n 100 "$dir/nexus.log"
+        exit 0
+      fi
+    done
+    echo "Файл журнала Nexus не найден"
+  args:
+    executable: /bin/bash
+  register: nexus_logs
+  ignore_errors: yes
+  changed_when: false
+
+- name: Вывод логов Nexus
+  debug:
+    var: nexus_logs.stdout_lines
+  when: nexus_logs is defined

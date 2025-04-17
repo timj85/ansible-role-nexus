@@ -1,0 +1,108 @@
+---
+- name: Install packages
+  dnf:
+    name: "{{ nexus_prerequisites }}"
+    state: present
+
+- name: Check if SystemD service is installed
+  stat:
+    path: /etc/systemd/system/nexus.service
+  register: nexus_systemd_service_file
+
+- name: Adjusting the Firewall
+  firewalld:
+    port: "{{ nexus_default_port }}/tcp"
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Include OS specific selinux libs and utils if needed
+  include_tasks: selinux.yml
+  when: ansible_selinux.status is defined and ansible_selinux.status == "enabled"
+
+- name: Create VG
+  include_tasks: create_vg.yml
+  
+- name: Создание пользователя и группы Nexus
+  include_tasks: nexus_user.yml
+
+- name: Установка Nexus
+  include_tasks: nexus_install.yml
+
+- name: Ensure required data directories exist with correct permissions
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: 0755
+  with_items:
+    - "{{ nexus_data_dir }}/etc"
+    - "{{ nexus_data_dir }}/log"
+    - "{{ nexus_data_dir }}/tmp"
+    - "{{ nexus_data_dir }}/karaf"
+    - "{{ nexus_data_dir }}/db"
+    - "{{ nexus_data_dir }}/blobs"
+    - "{{ nexus_data_dir }}/instances"
+    - "{{ nexus_data_dir }}/cache"
+    - "{{ nexus_data_dir }}/orient"
+    - "{{ nexus_data_dir }}/keystores"
+    - "{{ nexus_data_dir }}/backup"
+
+- name: Create empty Nexus log files if they don't exist
+  file:
+    path: "{{ item }}"
+    state: touch
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: 0644
+  with_items:
+    - "{{ nexus_data_dir }}/log/nexus.log"
+    - "{{ nexus_data_dir }}/log/karaf.log"
+    - "{{ nexus_data_dir }}/log/request.log"
+
+- name: Set run_as_user in nexus.rc
+  lineinfile:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+    regexp: '^#?run_as_user='
+    line: 'run_as_user="{{ nexus_os_user }}"'
+    state: present
+
+- name: Set NEXUS_DATA in nexus.rc
+  lineinfile:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+    regexp: '^#?NEXUS_DATA='
+    line: 'NEXUS_DATA="{{ nexus_data_dir }}"'
+    state: present
+
+- name: Create nexus.properties file
+  template:
+    src: nexus.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/nexus.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: 0644
+
+- name: Create service systemd
+  template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: 0644
+  register: service_updated
+
+- name: Reload demon systemd
+  systemd:
+    daemon_reload: yes
+  when: service_updated.changed
+
+- name: Start service Nexus
+  systemd:
+    name: nexus
+    state: started
+    enabled: yes
+  become: yes
+  register: nexus_start_result
+  ignore_errors: true
+

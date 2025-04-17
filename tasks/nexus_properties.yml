@@ -1,0 +1,9 @@
+---
+- name: Создание файла nexus.properties
+  template:
+    src: nexus.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/nexus.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  notify: nexus-service-restart 

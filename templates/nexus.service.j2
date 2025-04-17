@@ -1,0 +1,25 @@
+[Unit]
+Description=nexus service
+After=network.target
+
+[Service]
+Type=simple
+LimitNOFILE={{ nexus_systemd_limit_nofile }}
+User={{ nexus_os_user }}
+Group={{ nexus_os_group }}
+ExecStart={{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus run
+WorkingDirectory={{ nexus_installation_dir }}/nexus-{{ nexus_version }}
+
+# Используем Java 17
+Environment="JAVA_HOME=/usr/lib/jvm/java-17-openjdk"
+Environment="NEXUS_HOME={{ nexus_installation_dir }}/nexus-{{ nexus_version }}"
+Environment="NEXUS_DATA={{ nexus_data_dir }}"
+Environment="INSTALL4J_ADD_VM_PARAMS=-Xms{{ nexus_min_heap_size }} -Xmx{{ nexus_max_heap_size }} -XX:MaxDirectMemorySize={{ nexus_max_direct_memory }} -Djava.util.prefs.userRoot={{ nexus_data_dir }}/javaprefs -Dkaraf.home={{ nexus_installation_dir }}/nexus-{{ nexus_version }} -Dkaraf.base={{ nexus_installation_dir }}/nexus-{{ nexus_version }} -Dkaraf.etc={{ nexus_data_dir }}/etc/karaf -Dkaraf.data={{ nexus_data_dir }} -Dkaraf.log={{ nexus_data_dir }}/log -Djava.io.tmpdir={{ nexus_data_dir }}/tmp -Dinstall4j.pidDir={{ nexus_data_dir }}/tmp"
+
+# Настройки перезапуска для отладки
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target 

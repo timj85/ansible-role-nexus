@@ -1,0 +1,35 @@
+---
+- name: Ensure tmp directory exists in nexus data directory
+  file:
+    path: "{{ nexus_data_dir }}/tmp"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: 0755
+
+- name: Create systemd service file
+  template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: 0644
+  register: systemd_service_file
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  when: systemd_service_file.changed
+
+- name: Enable and start Nexus service
+  systemd:
+    name: nexus
+    enabled: yes
+    state: started
+  register: nexus_service_start
+  ignore_errors: yes
+
+- name: Display service start errors if any
+  debug:
+    var: nexus_service_start
+  when: nexus_service_start.failed 

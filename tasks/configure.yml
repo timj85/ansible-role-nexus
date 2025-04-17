@@ -1,0 +1,14 @@
+- name: Set run_as_user in nexus.rc
+  lineinfile:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.rc"
+    regexp: '^#?run_as_user='
+    line: 'run_as_user="{{ nexus_os_user }}"'
+    state: present
+  notify: nexus-service-restart
+
+- name: Set NEXUS_PIDDIR in nexus.vmoptions
+  lineinfile:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/bin/nexus.vmoptions"
+    line: "-Dinstall4j.pidDir={{ nexus_data_dir }}/tmp"
+    state: present
+  notify: nexus-service-restart 

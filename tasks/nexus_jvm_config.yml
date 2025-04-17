@@ -1,0 +1,19 @@
+---
+- name: Проверка наличия каталога karaf
+  file:
+    path: "{{ nexus_installation_dir }}/nexus-latest/etc/karaf"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+  when: nexus_version is version_compare('3.70.0', '>=')
+
+- name: Создание файла jvm.config для новых версий Nexus
+  template:
+    src: jvm.config.j2
+    dest: "{{ nexus_installation_dir }}/nexus-latest/etc/karaf/jvm.config"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: nexus_version is version_compare('3.70.0', '>=')
+  notify: nexus-service-restart 

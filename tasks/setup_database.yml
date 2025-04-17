@@ -1,0 +1,32 @@
+---
+- name: Проверка версии Nexus для определения типа базы данных
+  set_fact:
+    nexus_uses_new_db: "{{ nexus_version is version_compare('3.70.0', '>=') }}"
+
+- name: Создание каталога fabric для конфигурации базы данных
+  file:
+    path: "{{ nexus_data_dir }}/etc/fabric"
+    state: directory
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0755'
+  when: nexus_uses_new_db and nexus_db_type == 'postgresql'
+
+- name: Создание файла nexus-store.properties для PostgreSQL
+  template:
+    src: nexus-store.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/fabric/nexus-store.properties"
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: nexus_uses_new_db and nexus_db_type == 'postgresql'
+
+- name: Добавление параметра datastore в nexus.properties
+  lineinfile:
+    path: "{{ nexus_data_dir }}/etc/nexus.properties"
+    line: "nexus.datastore.enabled=true"
+    create: yes
+    owner: "{{ nexus_os_user }}"
+    group: "{{ nexus_os_group }}"
+    mode: '0644'
+  when: nexus_uses_new_db 

@@ -1,0 +1,174 @@
+---
+# defaults file for ansible-role-nexus
+nexus_version: "3.79.1"
+nexus_download_url: https://download.sonatype.com/nexus/3/nexus-3.79.1-04-linux-x86_64.tar.gz
+nexus_backup_dir: /var/nexus-backup
+nexus_os_group: nexus
+nexus_os_user: nexus
+nexus_os_max_filedescriptors: 65536
+nexus_installation_dir: /opt
+nexus_data_dir: /mnt/nexus
+#nexus_timezone: UTC # java timezone
+nexus_tmp_dir: /tmp/nexus
+
+# Настройки порта и хоста
+nexus_host: "0.0.0.0"
+nexus_port: 8081
+nexus_default_port: 8081
+nexus_default_host: "0.0.0.0"
+nexus_listen: "0.0.0.0"
+nexus_default_context_path: "/nexus"
+nexus_context_path: "/nexus"  # Для согласованности
+
+# Настройки памяти JVM
+nexus_min_heap_size: "4G"
+nexus_max_heap_size: "4G"
+nexus_max_direct_memory: "4G"
+nexus_onboarding_wizard: false
+nexus_jvm_args: "-server -Dcom.redhat.fips=false -Djava.util.prefs.userRoot=${NEXUS_DATA}/javaprefs -Dlog4j2.formatMsgNoLookups=true -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${NEXUS_DATA}/log"
+
+# Уменьшаем логи для лучшей производительности
+nexus_log_level: "WARN"  # Доступные уровни: DEBUG, INFO, WARN, ERROR
+
+nexus_plugin_urls: []
+nexus_api_scheme: http
+
+# Анонимный доступ (рекомендуется отключить в соответствии с чеклистом безопасности)
+nexus_anonymous_access: true
+
+# Хранилища блобов
+nexus_blobstores: []
+#  - name: local-storage
+#    type: file
+#    path: /mnt/blobstore
+
+# Настройки LDAP
+nexus_ldap_realm: false
+ldap_connections: []
+# example ldap config :
+#  - ldap_name: 'My Company LDAP' # used as a key to update the ldap config
+#    ldap_protocol: 'ldaps' # ldap or ldaps
+#    ldap_hostname: 'ldap.mycompany.com'
+#    ldap_port: 636
+#    ldap_use_trust_store: false  # Wether or not to use certs in nexus trust store
+#    ldap_auth: 'simple' or 'none'
+#    ldap_auth_username: 'username' (or DN)   (optional)
+#    ldap_auth_password: 'password'           (optional)
+#    ldap_search_base: 'dc=mycompany,dc=net'
+#    ldap_user_base_dn: 'ou=users'
+#    ldap_user_filter: '(cn=*)' # (optional)
+#    ldap_user_object_class: 'inetOrgPerson'
+#    ldap_user_id_attribute: 'uid'
+#    ldap_user_real_name_attribute: 'cn'
+#    ldap_user_email_attribute: 'mail'
+#    ldap_group_base_dn: 'ou=groups'
+#    ldap_group_object_class: 'posixGroup'
+#    ldap_group_id_attribute: 'cn'
+#    ldap_group_member_attribute: 'memberUid'
+#    ldap_group_member_format: '${username}'
+
+# Пользователи LDAP
+nexus_ldap_users: []
+# - username: j.doe
+#   state: present
+#   roles:
+#     - "nx-admin"
+
+# Роли
+nexus_roles: []
+#  - id: developers  # can map to a LDAP group id
+#    name: developers
+#    description: All developers
+#    privileges:
+#      - nx-search-read
+#      - all-repos-read
+#    roles: []
+
+nexus_java_home: /usr/lib/jvm/jre-11-openjdk
+
+# Настройки для запуска в качестве службы (systemd)
+nexus_service_enabled: true
+nexus_service_state: started
+nexus_systemd_service_name: "nexus"
+nexus_systemd_service_description: "Nexus Repository Manager"
+nexus_systemd_limit_nofile: 65536
+nexus_systemd_timeout_start_sec: 300  # Увеличено до 300 секунд
+nexus_systemd_timeout_stop_sec: 120
+nexus_systemd_restart: "on-abort"
+nexus_systemd_restart_sec: 60
+
+# Настройки задач обслуживания в соответствии с документацией
+nexus_setup_maintenance_tasks: true
+nexus_maintenance_tasks:
+  - name: "Maven - Delete unused SNAPSHOTS"
+    enabled: true
+    typeId: "repository.maven.remove-snapshots"
+    schedule: "0 0 2 * * ?"  # Каждый день в 2:00
+    properties:
+      repositoryName: "*"  # Все репозитории
+      minimumRetained: 1
+      snapshotRetentionDays: 30
+      removeIfReleased: true
+      gracePeriodInDays: 2
+  
+  
+  - name: "Admin - Compact blob store"
+    enabled: true
+    typeId: "blobstore.compact"
+    schedule: "0 0 4 * * ?"  # Каждый день в 4:00
+    properties:
+      blobstoreName: "default"  # Имя blob store для компактификации
+  
+  - name: "Cleanup - Apply cleanup policies"
+    enabled: true
+    typeId: "repository.cleanup"
+    schedule: "0 0 1 * * ?"  # Каждый день в 1:00
+    properties:
+      repositoryName: "*"  # Все репозитории
+  
+  - name: "Admin - Rebuild repository search"
+    enabled: true
+    typeId: "repository.rebuild-index"
+    schedule: "0 0 5 ? * SUN"  # Каждое воскресенье в 5:00
+    properties:
+      repositoryName: "*"  # Все репозитории
+  
+  - name: "Admin - Clear caches"
+    enabled: true
+    typeId: "repository.purge-unused"
+    schedule: "0 0 23 * * ?"  # Каждый день в 23:00
+    properties:
+      repositoryName: "*"  # Все репозитории
+
+# Настройки для очистки (cleanup policies)
+nexus_cleanup_policies:
+  - name: "cleanup-maven-releases"
+    format: "maven2"
+    mode: "delete"
+    criteria:
+      lastDownloaded: 365  # Удалять компоненты, не загружавшиеся более года
+  
+# Настройки для резервного копирования
+nexus_backup_enabled: true
+nexus_backup_schedule: "0 0 1 * * ?"  # Каждый день в 1:00
+nexus_backup_retention_days: 7  # Хранить резервные копии 7 дней
+
+# Настройки безопасности (рекомендуется в соответствии с чеклистом)
+nexus_setup_token_authentication: true
+nexus_setup_routing_rules: true
+
+# Настройки скриптов
+nexus_scripts_allowCreation: true
+
+# Настройки для уменьшения логов
+nexus_debug_logs: false  # По умолчанию отключаем отладочные логи
+nexus_show_fail_logs: true  # Оставляем логи при ошибках, но с возможностью отключения
+nexus_log_level: "WARN"  # Устанавливаем уровень логирования на WARN вместо INFO
+
+# Настройки ротации логов для уменьшения места на диске
+nexus_log_max_history: 7  # Хранить логи только за последние 7 дней
+nexus_log_max_size: "10MB"  # Максимальный размер файла лога
+
+# Настройки пароля администратора
+nexus_admin_password: "{{ vault_nexus_admin_password }}"
+nexus_default_admin_password: 'admin123'  # Исходный пароль, используемый при первом запуске

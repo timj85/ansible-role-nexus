@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{"yyyy-MM-dd HH:mm:ss,SSSZ"} %-5p [%thread] %X{userId} %c - %m%n</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="file" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${karaf.data}/log/nexus.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>${karaf.data}/log/nexus-%d{yyyy-MM-dd}.log</fileNamePattern>
+      <maxHistory>{{ nexus_log_max_history | default(7) }}</maxHistory>
+    </rollingPolicy>
+    <encoder>
+      <pattern>%d{"yyyy-MM-dd HH:mm:ss,SSSZ"} %-5p [%thread] %X{userId} %c - %m%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="org.eclipse.jetty" level="{{ nexus_log_level | default('WARN') }}"/>
+  <logger name="org.apache" level="{{ nexus_log_level | default('WARN') }}"/>
+  <logger name="org.sonatype" level="{{ nexus_log_level | default('WARN') }}"/>
+
+  <!-- Уменьшаем количество логов от часто используемых компонентов -->
+  <logger name="org.sonatype.nexus.repository" level="{{ nexus_log_level | default('WARN') }}"/>
+  <logger name="org.sonatype.nexus.blobstore" level="{{ nexus_log_level | default('WARN') }}"/>
+  <logger name="org.sonatype.nexus.transaction" level="{{ nexus_log_level | default('WARN') }}"/>
+  <logger name="org.sonatype.nexus.security" level="{{ nexus_log_level | default('WARN') }}"/>
+
+  <root level="{{ nexus_log_level | default('WARN') }}">
+    <appender-ref ref="console"/>
+    <appender-ref ref="file"/>
+  </root>
+</configuration> 

@@ -1,0 +1,7 @@
+---
+- name: Make sure we have the necessary yum packages available for selinux
+  dnf:
+    name:
+      - python3-libselinux
+      - python3-libsemanage
+    state: present

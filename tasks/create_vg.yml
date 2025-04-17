@@ -1,0 +1,26 @@
+---
+- name: Create VG
+  community.general.lvg:
+    vg: vg_data
+    pvs: "{{ nexus_second_disk }}"
+- name: Create LV
+  community.general.lvol:
+    vg: vg_data
+    lv: lvnexus
+    size: 100%FREE
+    shrink: False
+- name: Make FS
+  community.general.filesystem:
+    fstype: ext4
+    dev: /dev/mapper/vg_data-lvnexus
+- name: Create directory
+  ansible.builtin.file:
+    path: /mnt/nexus
+    state: directory
+    mode: '0755'
+- name: Mount FS
+  mount:
+    path: /mnt/nexus
+    src: /dev/mapper/vg_data-lvnexus
+    fstype: ext4
+    state: mounted

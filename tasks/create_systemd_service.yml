@@ -1,0 +1,25 @@
+---
+- name: Проверка наличия файла службы Nexus
+  stat:
+    path: /etc/systemd/system/nexus.service
+  register: nexus_service_file
+
+- name: Проверка наличия каталога Nexus
+  stat:
+    path: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}"
+  register: nexus_dir
+
+- name: Создание файла службы Nexus
+  template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: '0644'
+  register: service_created
+  notify: systemd-reload
+
+- name: Перезагрузка systemd
+  systemd:
+    daemon_reload: yes
+  when: service_created.changed 

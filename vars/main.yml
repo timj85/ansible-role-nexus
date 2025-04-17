@@ -1,0 +1,39 @@
+---
+# vars file for ansible-role-nexus
+nexus_package: "nexus-{{ nexus_version }}-unix.tar.gz"
+nexus_script_dir: "{{ nexus_installation_dir }}/nexus-{{ nexus_version }}/etc/scripts"
+nexus_second_disk: /dev/vdb
+
+nexus_prerequisites:
+  - unzip
+  - wget
+  - java-17-openjdk-devel
+  - rsync
+
+nexus_default_settings_file: "{{ nexus_installation_dir }}/nexus-latest/etc/nexus-default.properties"
+nexus_app_dir_settings_dirs:
+  - "{{ nexus_installation_dir }}/nexus-latest/etc"
+  - "{{ nexus_installation_dir }}/nexus-latest/etc/karaf"
+  - "{{ nexus_installation_dir }}/nexus-latest/etc/jetty"
+  - "{{ nexus_installation_dir }}/nexus-latest/etc/fabric"
+  - "{{ nexus_installation_dir }}/nexus-latest/etc/logback"
+  - "{{ nexus_installation_dir }}/nexus-latest/etc/scripts"
+nexus_rest_api_endpoint: "service/rest/v1/script"
+
+nexus_api_hostname: "{{ nexus_listen }}"
+nexus_api_port: "{{ nexus_default_port }}"
+nexus_api_context_path: "{{ nexus_default_context_path }}"
+nexus_api_validate_certs: "{{ nexus_api_scheme == 'https' }}"
+nexus_tmp_dir: /tmp/nexus
+
+nexus_default_settings:
+  - { regexp: "application-port", value: "{{ nexus_default_port }}" }
+  - { regexp: "nexus-context-path", value: "{{ nexus_default_context_path }}" }
+  - { regexp: "application-host", value: "{{ nexus_listen }}" }
+  - { regexp: "nexus.scripts.allowCreation", value: "true" }
+
+nexus_options:
+  - { regexp: "-Djava.io.tmpdir", value: "{{ nexus_tmp_dir }}" }
+  - { regexp: "-Dkaraf.data", value: "{{ nexus_data_dir }}" }
+  - { regexp: "-XX:LogFile", value: "{{ nexus_data_dir }}/log/jvm.log" }
+  - { regexp: "-XX:MaxDirectMemorySize", value: "{{ nexus_max_direct_memory }}" }
